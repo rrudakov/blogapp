@@ -3,6 +3,7 @@
 module App.Routes
   ( UsersAPI
   , API
+  , api
   ) where
 
 import Servant
@@ -19,4 +20,7 @@ type UsersAPI =
 
 -- |Common API
 type API =
-  "users" :> UsersAPI
+  "users" :> BasicAuth "user-realm" User :> UsersAPI
+
+api :: Proxy API
+api = Proxy

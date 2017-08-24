@@ -12,6 +12,8 @@ module App.Models
 import App.Errors
 import Control.Exception.Base
 import Data.Aeson
+import Crypto.BCrypt
+import Data.ByteString.Char8 (pack)
 import Data.Monoid
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Errors
@@ -29,10 +31,10 @@ data User = User
 
 instance ToJSON User where
   toJSON (User userid login password) =
-    object ["id" .= userid, "username" .= login, "password" .= password]
+    object ["id" .= userid, "username" .= login]
 
   toEncoding (User userid login password) =
-    pairs ("id" .= userid <> "username" .= login <> "password" .= password)
+    pairs ("id" .= userid <> "username" .= login)
 
 instance FromJSON User where
   parseJSON = withObject "User" $ \ v -> User
@@ -48,12 +50,15 @@ instance ToRow User where
 instance FromRow User where
   fromRow = User <$> field <*> field <*> field
 
-lookupUser :: Connection -> User -> IO (Maybe Int)
-lookupUser conn user = do
-  res <- query conn "SELECT id FROM users WHERE username=? AND password=?" (userLogin user, userPassword user)
+lookupUser :: Connection -> String -> String -> IO (Either String User)
+lookupUser conn username password = do
+  res <- query conn "SELECT * FROM users WHERE username=?" [username]
   case res of
-    [Only userid] -> return $ Just userid
-    _ -> return Nothing
+    [user] -> do
+      case validatePassword (pack $ userPassword user) (pack password) of
+        True -> return $ Right user
+        False -> return $ Left wrongPasswordErr
+    _ -> return $ Left loginIncorrectErr
 
 allUsers :: Connection -> IO [User]
 allUsers conn = query_ conn "SELECT * FROM users ORDER BY username"

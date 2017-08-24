@@ -3,9 +3,8 @@ module App
     , app
     ) where
 
-import           App.Models
-import           App.Routes
-import           App.Server
+import           App.Routes (api)
+import           App.Server (server, basicAuthServerContext)
 import           Database.PostgreSQL.Simple (Connection, connectDatabase, connectPassword, connectUser, connectHost, connect, defaultConnectInfo)
 import           Network.Wai
 import           Network.Wai.Handler.Warp
@@ -24,4 +23,4 @@ startApp = do
 
 
 app :: Connection -> Application
-app conn = serve api $ server conn
+app conn = serveWithContext api (basicAuthServerContext conn) (server conn)

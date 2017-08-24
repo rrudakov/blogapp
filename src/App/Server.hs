@@ -1,19 +1,22 @@
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 module App.Server
   ( server
-  , api
+  , basicAuthServerContext
   ) where
 
 import App.Errors
 import App.Models
-import App.Routes
+import Data.ByteString.Char8 (pack, unpack)
+import App.Routes (UsersAPI, API) 
 import Control.Monad.IO.Class
 import Data.Aeson
 import Database.PostgreSQL.Simple (Connection)
 import Servant
 import Network.Wai (Application, Request)
 
+-- |Error message wrapped in JSON
 data ErrJson = ErrJson String
 
 instance ToJSON ErrJson where
@@ -21,11 +24,19 @@ instance ToJSON ErrJson where
 
   toEncoding (ErrJson msg) = pairs ("err" .= msg)
 
-api :: Proxy API
-api = Proxy
+-- |Basic auth staff
+authCheck :: Connection -> BasicAuthCheck User
+authCheck conn = BasicAuthCheck $ \ (BasicAuthData username password) -> do
+  res <- lookupUser conn (unpack username) (unpack password)
+  case res of
+    Right user -> return (Authorized user)
+    Left _ -> return Unauthorized
 
-usersServer :: Connection -> Server UsersAPI
-usersServer conn =
+basicAuthServerContext :: Connection -> Context (BasicAuthCheck User ': '[])
+basicAuthServerContext conn = (authCheck conn) :. EmptyContext
+
+usersServer :: Connection -> User -> Server UsersAPI
+usersServer conn user =
   allUsersHandler conn :<|>
   getUserHandler conn :<|>
   saveUserHandler conn :<|>

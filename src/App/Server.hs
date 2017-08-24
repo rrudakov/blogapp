@@ -12,8 +12,6 @@ import Control.Monad.IO.Class
 import Data.Aeson
 import Database.PostgreSQL.Simple (Connection)
 import Servant
-import Servant.Server.Experimental.Auth (AuthHandler, mkAuthHandler)
-import Servant.Server.Experimental.Auth.Cookie
 import Network.Wai (Application, Request)
 
 data ErrJson = ErrJson String
@@ -34,37 +32,8 @@ usersServer conn =
   updateUserHandler conn :<|>
   deleteUserHandler conn
 
--- server :: Connection -> Server API
--- server conn = usersServer conn
-
--- | Implementation
-server :: (ServerKeySet s) => Connection -> AuthCookieSettings -> RandomSource -> s -> Server AuthAPI
-server conn settings rs sks =
-  serveLoginPost conn :<|>
-  serveLogout :<|>
-  serveAllUsers
-  where
-
-  addSession' = addSession
-    settings -- the settings
-    rs       -- random source
-    sks      -- server key set
-
-  serveLoginPost conn user = do
-    res <- liftIO $ lookupUser conn user
-    case res of
-      Nothing   -> throwError $ err401 { errBody = encode $ ErrJson "UNAUTHORIZED" }
-      Just userid  -> addSession'
-        (User (Just userid) (userLogin user) (userPassword user))
-        (User (Just userid) (userLogin user) (userPassword user))
-
-  serveLogout = removeSession settings ()
-
-  serveAllUsers = cookied settings rs sks (servePrivate)
-
-  servePrivate :: User -> [User]
-  servePrivate (User i u _) = [User Nothing "rrudakov" "testpass"]
-
+server :: Connection -> Server API
+server conn = usersServer conn
 
 -- |User handlers
 allUsersHandler :: Connection -> Handler [User]

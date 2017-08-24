@@ -22,13 +22,7 @@ library
                      , App.Server
   build-depends:       base >= 4.7 && < 5
                      , aeson
-                     , data-default
-                     , cryptonite
-                     , exceptions
-                     , bytestring
                      , servant-server
-                     , servant-auth-cookie
-                     , cereal
                      , wai
                      , warp
                      , postgresql-simple

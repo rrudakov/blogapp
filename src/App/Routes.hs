@@ -1,21 +1,12 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeOperators #-}
 module App.Routes
-  ( AuthAPI
-  , UsersAPI
+  ( UsersAPI
   , API
   ) where
 
 import Servant
-import Servant.Server.Experimental.Auth.Cookie
 import App.Models (User)
-
--- |Auth API
-type AuthAPI =
-  "login" :> ReqBody '[JSON] User :> Post '[JSON] (Cookied User) :<|>
-  "logout" :> Get '[JSON] (Cookied ()) :<|>
-  "users" :> AuthProtect "cookie-auth" :> Get '[JSON] (Cookied [User])
-
   
 
 -- |Users API

@@ -1,5 +1,3 @@
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE OverloadedStrings #-}
 module App.Models
   ( User (..)
@@ -15,25 +13,19 @@ import App.Errors
 import Control.Exception.Base
 import Data.Aeson
 import Data.Monoid
-import Data.Serialize (Serialize)
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Errors
 import Database.PostgreSQL.Simple.FromRow
 import Database.PostgreSQL.Simple.ToField
 import Database.PostgreSQL.Simple.ToRow
-import GHC.Generics
-import Servant.Server.Experimental.Auth.Cookie (AuthCookieData)
+
 
 -- |User data type
 data User = User
   { userId :: Maybe Int
   , userLogin :: !String
   , userPassword :: !String
-  } deriving (Eq, Show, Generic)
-
-instance Serialize User
-
-type instance AuthCookieData = User
+  } deriving (Eq, Show)
 
 instance ToJSON User where
   toJSON (User userid login password) =

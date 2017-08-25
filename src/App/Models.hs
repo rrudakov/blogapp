@@ -81,7 +81,7 @@ saveUser conn user = handleJust constraintViolation handler $ do
   h <- hashPasswordUsingPolicy fastBcryptHashingPolicy (pack $ userPassword user)
   case h of
     Just hash -> do
-      [Only i] <- query conn "INSERT INTO users (username, password) VALUES (?, ?) RETURNING id" (userLogin user, hash)
+      [Only i] <- query conn "INSERT INTO users (username, password, is_active, is_admin) VALUES (?, ?, ?, ?) RETURNING id" (userLogin user, hash, userIsActive user, userIsAdmin user)
       return $ Right i
     Nothing -> return $ Left ServerErr
   where

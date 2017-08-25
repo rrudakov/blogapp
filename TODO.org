@@ -1,0 +1,10 @@
+#+TITLE: Roadmap for my blogapp
+* [0/4] ver-0.2.0.0
+** TODO Separate YAML config
+** TODO [0/4] Posts API
+*** TODO Post datatype
+*** TODO Post routes
+*** TODO Post server
+** TODO [0/2] Improve access rights
+*** TODO Only admin can see users list
+*** TODO User can update only own data

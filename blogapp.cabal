@@ -2,15 +2,15 @@ name:                blogapp
 version:             0.1.0.0
 -- synopsis:
 -- description:
-homepage:            https://github.com/githubuser/blogapp#readme
-license:             BSD3
+homepage:            https://github.com/beriya/blogapp#readme
+license:             MIT
 license-file:        LICENSE
 author:              Roman Rudakov
-maintainer:          example@example.com
-copyright:           2017 Author name here
+maintainer:          rrudakov@protonmail.com
+copyright:           2017 Roman Rudakov
 category:            Web
 build-type:          Simple
-extra-source-files:  README.md
+extra-source-files:  README.org
 cabal-version:       >=1.10
 
 library
@@ -65,4 +65,4 @@ test-suite blogapp-test
 
 source-repository head
   type:     git
-  location: https://github.com/githubuser/blogapp
+  location: https://github.com/beriya/blogapp

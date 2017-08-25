@@ -1,19 +1,24 @@
+{-# LANGUAGE OverloadedStrings #-}
 module App.Errors where
 
-loginExistErr :: String
-loginExistErr = "LOGIN_ALREADY_EXIST"
+import Data.Aeson
 
-loginIncorrectErr :: String
-loginIncorrectErr = "LOGIN_INCORRECT"
+data BlogError = LoginExistErr
+               | LoginIncorrectErr
+               | WrongPasswordErr
+               | DataBaseErr
+               | UserNotFoundErr
+               | ServerErr
 
-wrongPasswordErr :: String
-wrongPasswordErr = "WRONG_PASSWORD"
+instance Show BlogError where
+  show LoginExistErr = "LOGIN_ALREADY_EXIST"
+  show LoginIncorrectErr = "LOGIN_INCORRECT"
+  show WrongPasswordErr = "WRONG_PASSWORD"
+  show DataBaseErr = "DATABASE_ERROR"
+  show UserNotFoundErr = "USER_NOT_FOUND"
+  show ServerErr = "SERVER_ERROR"
 
-dataBaseErr :: String
-dataBaseErr = "DATABASE_ERROR"
+instance ToJSON BlogError where
+  toJSON err = object ["err" .= show err]
 
-userNotFoundErr :: String
-userNotFoundErr = "USER_NOT_FOUND"
-
-serverErr :: String
-serverErr = "SERVER_ERROR"
+  toEncoding err = pairs ("err" .= show err)

@@ -22,7 +22,7 @@ main = do
   h <- hashPasswordUsingPolicy fastBcryptHashingPolicy (pack password)
   case h of
     Just hash -> do
-      res <- execute conn "INSERT INTO users (id, username, password) VALUES (?, ?, ?)" (1 :: Int, "admin" :: String, h)
+      res <- execute conn "INSERT INTO users (id, username, password, is_active, is_admin) VALUES (?, ?, ?, ?, ?)" (1 :: Int, "admin" :: String, h, True, True)
       case res of
         1 -> putStrLn "Successfull"
         _ -> putStrLn "Unable to inserd password in database"

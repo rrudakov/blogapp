@@ -29,6 +29,7 @@ library
                      , warp
                      , postgresql-simple
                      , bcrypt
+                     , time
   default-language:    Haskell2010
 
 executable blogapp

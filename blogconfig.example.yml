@@ -1,0 +1,7 @@
+database:
+  host: '127.0.0.1'
+  username: 'db_user'
+  password: 'db_password'
+  database_name: 'blogdb'
+server:
+  port: 8080

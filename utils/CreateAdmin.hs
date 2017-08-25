@@ -1,19 +1,20 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main where
 
-import Crypto.BCrypt
+import App.Config (BlogConfig (..), ServerConfig (..), blogConnectInfo)
 import Control.Monad
+import Crypto.BCrypt
 import Data.ByteString.Char8 (pack)
-import           Database.PostgreSQL.Simple
+import Data.Yaml.Config
+import Database.PostgreSQL.Simple
 
 main :: IO ()
 main = do
+  -- Read config file
+  config <- loadYamlSettings ["blogconfig.yml"] [] ignoreEnv
+  let dbConfig = blogDB config
   -- Connect to database
-  conn <- connect defaultConnectInfo
-    { connectHost = "192.168.56.170"
-    , connectUser = "blogger"
-    , connectPassword = "123456"
-    , connectDatabase = "blogapp_dev"}
+  conn <- connect $ blogConnectInfo dbConfig
   putStrLn "Enter password for admin user:"
   password <- getLine
   putStrLn "Confirm password:"

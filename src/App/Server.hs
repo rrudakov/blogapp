@@ -10,15 +10,15 @@ module App.Server
 
 import App.Errors
 import App.Models
+import App.Routes (PublicAPI, UsersAPI, API)
 import Control.Monad.Catch (catch)
-import Data.ByteString.Char8 (pack, unpack)
-import App.Routes (PublicAPI, UsersAPI, API) 
 import Control.Monad.IO.Class
 import Data.Aeson
+import Data.ByteString.Char8 (pack, unpack)
 import Data.Default (def)
 import Database.PostgreSQL.Simple (Connection)
-import Servant
 import Network.Wai (Application, Request)
+import Servant
 import Servant.Server.Experimental.Auth (AuthHandler, mkAuthHandler)
 import Servant.Server.Experimental.Auth.Cookie
 
@@ -27,11 +27,11 @@ authHandler :: (ServerKeySet s)
   -> AuthHandler Request (WithMetadata AuthUserData)
 authHandler sks = mkAuthHandler $ \ request ->
   (getSession authSettings sks request) `catch` handleEx >>= maybe
-    (throwError err403 { errBody = "No cookies" })
+    (throwError err403 { errBody = encode NoAuthCookiesErr })
     (return)
   where
     handleEx :: AuthCookieException -> Handler (Maybe (WithMetadata AuthUserData))
-    handleEx ex = throwError err403 { errBody = "JOPA" }
+    handleEx ex = throwError err403 { errBody = encode WrongAuthCookiesErr }
 
 authSettings :: AuthCookieSettings
 authSettings = def
@@ -84,7 +84,7 @@ loginUserHandler :: (ServerKeySet s)
 loginUserHandler rs sks conn auth = do
   res <- liftIO $ lookupAuth conn auth
   case res of
-    Right user -> addSession' auth user
+    Right user -> addSession' (AuthUserData (Just $ userId user) (userLogin user) (userPassword user)) user
     Left err -> throwError $ err401 { errBody = encode err }
   where
     addSession' = addSession authSettings rs sks
@@ -121,9 +121,9 @@ getUserHandler rs sks conn userid =
         Just user -> return user
         Nothing -> throwError $ err404 { errBody = encode UserNotFoundErr }
 
-saveUserHandler :: Connection -> User -> Handler (Headers '[Header "Location" String] Int)
-saveUserHandler conn user = do
-  res <- liftIO $ saveUser conn user
+saveUserHandler :: Connection -> AuthUserData -> Handler (Headers '[Header "Location" String] Int)
+saveUserHandler conn auth = do
+  res <- liftIO $ saveUser conn auth
   case res of
     Right userid -> return $ addHeader ("/users/" ++ show userid) userid
     Left err -> throwError $ err500 { errBody = encode err }
@@ -141,11 +141,19 @@ updateUserHandler rs sks conn userid user =
   where
     updateUserHandler' :: AuthUserData -> Handler ()
     updateUserHandler' auth = do
-      res <- liftIO $ updateUser conn userid user
-      case res of
-        1 -> return ()
-        0 -> throwError $ err404 { errBody = encode UserNotFoundErr }
-        _ -> throwError $ err500 { errBody = encode ServerErr }
+      case authId auth of
+        Just i -> do
+          u <- liftIO $ getUser conn i
+          case u of
+            Just _user -> if userIsAdmin _user || userid == i
+              then do
+              res <- liftIO $ updateUser conn userid user
+              case res of
+                Right () -> return ()
+                Left err -> throwError $ err404 { errBody = encode err }
+              else throwError $ err401 { errBody = encode AccessDeniedErr }
+            Nothing -> throwError $ err404 { errBody = encode UserNotFoundErr }
+        Nothing -> throwError $ err403 { errBody = encode WrongAuthCookiesErr }
 
 deleteUserHandler :: (ServerKeySet s)
   => RandomSource

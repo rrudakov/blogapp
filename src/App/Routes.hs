@@ -7,13 +7,13 @@ module App.Routes
   , api
   ) where
 
-import Servant
 import App.Models (User, AuthUserData)
+import Servant
 import Servant.Server.Experimental.Auth.Cookie
 
 -- |Public API
 type PublicAPI =
-  "register" :> ReqBody '[JSON] User :> PostCreated '[JSON] (Headers '[Header "Location" String] Int) :<|>
+  "register" :> ReqBody '[JSON] AuthUserData :> PostCreated '[JSON] (Headers '[Header "Location" String] Int) :<|>
   "login" :> ReqBody '[JSON] AuthUserData :> Post '[JSON] (Cookied User) :<|>
   "logout" :> Get '[JSON] (Cookied ())
 

@@ -4,8 +4,7 @@
 module App.Models
   ( User (..)
   , AuthUserData (..)
-  ,lookupAuth
-  , lookupUser
+  , lookupAuth
   , allUsers
   , saveUser
   , getUser
@@ -15,12 +14,12 @@ module App.Models
 
 import App.Errors
 import Control.Exception.Base
-import Data.Aeson
-import Data.Serialize (Serialize)
-import Data.Time.Clock.POSIX
 import Crypto.BCrypt
+import Data.Aeson
 import Data.ByteString.Char8 (pack)
 import Data.Monoid
+import Data.Serialize (Serialize)
+import Data.Time.Clock.POSIX
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Errors
 import Database.PostgreSQL.Simple.FromRow
@@ -31,7 +30,8 @@ import Servant.Server.Experimental.Auth.Cookie (AuthCookieData)
 
 -- |AuthUserData
 data AuthUserData = AuthUserData
-  { authLogin :: !String
+  { authId :: Maybe Int
+  , authLogin :: !String
   , authPassword :: !String
   } deriving (Eq, Show, Generic)
 
@@ -41,7 +41,8 @@ type instance AuthCookieData = AuthUserData
 
 instance FromJSON AuthUserData where
   parseJSON = withObject "AuthUserData" $ \ v -> AuthUserData
-    <$> v .: "username"
+    <$> v .:? "id"
+    <*> v .: "username"
     <*> v .: "password"
 
 lookupAuth :: Connection -> AuthUserData -> IO (Either BlogError User)
@@ -56,7 +57,7 @@ lookupAuth conn auth = do
 
 -- |User data type
 data User = User
-  { userId :: Maybe Int
+  { userId :: !Int
   , userLogin :: !String
   , userPassword :: !String
   , userIsActive :: !Bool
@@ -79,7 +80,7 @@ instance ToJSON User where
 
 instance FromJSON User where
   parseJSON = withObject "User" $ \ v -> User
-    <$> v .:? "id"
+    <$> v .: "id"
     <*> v .: "username"
     <*> v .: "password"
     <*> v .:? "is_active" .!= True
@@ -93,26 +94,15 @@ instance ToRow User where
 instance FromRow User where
   fromRow = User <$> field <*> field <*> field <*> field <*> field
 
-lookupUser :: Connection -> String -> String -> IO (Either BlogError User)
-lookupUser conn username password = do
-  res <- query conn "SELECT * FROM users WHERE username=?" [username]
-  case res of
-    [user] -> do
-      case validatePassword (pack $ userPassword user) (pack password) of
-        True -> return $ Right user
-        False -> return $ Left WrongPasswordErr
-    _ -> return $ Left LoginIncorrectErr
-
 allUsers :: Connection -> IO [User]
 allUsers conn = query_ conn "SELECT * FROM users ORDER BY username"
 
-
-saveUser :: Connection -> User -> IO (Either BlogError Int)
-saveUser conn user = handleJust constraintViolation handler $ do
-  h <- hashPasswordUsingPolicy fastBcryptHashingPolicy (pack $ userPassword user)
+saveUser :: Connection -> AuthUserData -> IO (Either BlogError Int)
+saveUser conn auth = handleJust constraintViolation handler $ do
+  h <- hashPasswordUsingPolicy fastBcryptHashingPolicy (pack $ authPassword auth)
   case h of
     Just hash -> do
-      [Only i] <- query conn "INSERT INTO users (username, password, is_active, is_admin) VALUES (?, ?, ?, ?) RETURNING id" (userLogin user, hash, userIsActive user, userIsAdmin user)
+      [Only i] <- query conn "INSERT INTO users (username, password, is_active, is_admin) VALUES (?, ?, ?, ?) RETURNING id" (authLogin auth, hash, True, False)
       return $ Right i
     Nothing -> return $ Left ServerErr
   where
@@ -126,14 +116,18 @@ getUser conn userid = do
     [user] -> return $ Just user
     _ -> return Nothing
 
-updateUser :: Connection -> Int -> User -> IO Int
+updateUser :: Connection -> Int -> User -> IO (Either BlogError ())
 updateUser conn userid user = do
-  res <- execute conn "UPDATE users SET password=? WHERE id=?" (userPassword user, userid)
-  return $ fromIntegral res
+  h <- hashPasswordUsingPolicy fastBcryptHashingPolicy (pack $ userPassword user)
+  case h of
+    Just hash -> do
+      putStrLn $ show hash
+      res <- execute conn "UPDATE users SET password=? WHERE id=?" (hash, userid)
+      case res of
+        1 -> return $ Right ()
+        0 -> return $ Left UserNotFoundErr
+        _ -> return $ Left ServerErr
+    Nothing -> return $ Left ServerErr
 
 deleteUser :: Connection -> Int -> IO Int
 deleteUser conn userid = execute conn "DELETE FROM users WHERE id=?" [userid] >>= \res ->  return $ fromIntegral res
-
-
--- -- |Profile data type
--- data UserProfile = 

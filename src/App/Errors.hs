@@ -9,6 +9,9 @@ data BlogError = LoginExistErr
                | DataBaseErr
                | UserNotFoundErr
                | ServerErr
+               | NoAuthCookiesErr
+               | WrongAuthCookiesErr
+               | AccessDeniedErr
 
 instance Show BlogError where
   show LoginExistErr = "LOGIN_ALREADY_EXIST"
@@ -17,6 +20,9 @@ instance Show BlogError where
   show DataBaseErr = "DATABASE_ERROR"
   show UserNotFoundErr = "USER_NOT_FOUND"
   show ServerErr = "SERVER_ERROR"
+  show NoAuthCookiesErr = "NO_AUTH_COOKIES"
+  show WrongAuthCookiesErr = "WRONG_AUTH_COOKIES"
+  show AccessDeniedErr = "ACCESS_DENIED"
 
 instance ToJSON BlogError where
   toJSON err = object ["err" .= show err]

@@ -1,6 +1,10 @@
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 module App.Models
   ( User (..)
+  , AuthUserData (..)
+  ,lookupAuth
   , lookupUser
   , allUsers
   , saveUser
@@ -12,6 +16,7 @@ module App.Models
 import App.Errors
 import Control.Exception.Base
 import Data.Aeson
+import Data.Serialize (Serialize)
 import Data.Time.Clock.POSIX
 import Crypto.BCrypt
 import Data.ByteString.Char8 (pack)
@@ -21,7 +26,33 @@ import Database.PostgreSQL.Simple.Errors
 import Database.PostgreSQL.Simple.FromRow
 import Database.PostgreSQL.Simple.ToField
 import Database.PostgreSQL.Simple.ToRow
+import GHC.Generics
+import Servant.Server.Experimental.Auth.Cookie (AuthCookieData)
 
+-- |AuthUserData
+data AuthUserData = AuthUserData
+  { authLogin :: !String
+  , authPassword :: !String
+  } deriving (Eq, Show, Generic)
+
+instance Serialize AuthUserData
+
+type instance AuthCookieData = AuthUserData
+
+instance FromJSON AuthUserData where
+  parseJSON = withObject "AuthUserData" $ \ v -> AuthUserData
+    <$> v .: "username"
+    <*> v .: "password"
+
+lookupAuth :: Connection -> AuthUserData -> IO (Either BlogError User)
+lookupAuth conn auth = do
+  res <- query conn "SELECT * FROM users WHERE username=?" [authLogin auth]
+  case res of
+    [user] -> do
+      case validatePassword (pack $ userPassword user) (pack $  authPassword auth) of
+        True -> return $ Right user
+        False -> return $ Left WrongPasswordErr
+    _ -> return $ Left LoginIncorrectErr
 
 -- |User data type
 data User = User

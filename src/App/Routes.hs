@@ -8,23 +8,25 @@ module App.Routes
   ) where
 
 import Servant
-import App.Models (User)
+import App.Models (User, AuthUserData)
+import Servant.Server.Experimental.Auth.Cookie
 
 -- |Public API
 type PublicAPI =
-  "register" :> ReqBody '[JSON] User :> PostCreated '[JSON] (Headers '[Header "Location" String] Int)
+  "register" :> ReqBody '[JSON] User :> PostCreated '[JSON] (Headers '[Header "Location" String] Int) :<|>
+  "login" :> ReqBody '[JSON] AuthUserData :> Post '[JSON] (Cookied User)
 
 -- |Users API
 type UsersAPI =
-  Get '[JSON] [User] :<|>
-  Capture "id" Int :> Get '[JSON] User :<|>
-  Capture "id" Int :> ReqBody '[JSON] User :> Patch '[JSON] () :<|>
-  Capture "id" Int :> Delete '[JSON] ()
+  AuthProtect "cookie-auth" :> Get '[JSON] (Cookied [User]) :<|>
+  Capture "id" Int :> AuthProtect "cookie-auth" :> Get '[JSON] (Cookied User) :<|>
+  Capture "id" Int :> ReqBody '[JSON] User :> AuthProtect "cookie-auth" :> Patch '[JSON] (Cookied ()) :<|>
+  Capture "id" Int :> AuthProtect "cookie-auth" :> Delete '[JSON] (Cookied ())
 
 -- |Common API
 type API =
   PublicAPI :<|>
-  "users" :> BasicAuth "user-realm" User :> UsersAPI
+  "users" :> UsersAPI
 
 api :: Proxy API
 api = Proxy

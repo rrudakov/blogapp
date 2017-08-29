@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module App
     ( startApp
     , app
@@ -5,12 +6,14 @@ module App
 
 import App.Config (BlogConfig (..), ServerConfig (..), blogConnectInfo)
 import App.Routes (api)
-import App.Server (server, basicAuthServerContext)
+import App.Server (server, authContext)
+import Crypto.Random (drgNew)
 import Data.Yaml.Config
 import Database.PostgreSQL.Simple (Connection, connectDatabase, connectPassword, connectUser, connectHost, connect, defaultConnectInfo)
 import Network.Wai
 import Network.Wai.Handler.Warp
 import Servant
+import Servant.Server.Experimental.Auth.Cookie
 
 startApp :: IO ()
 startApp = do
@@ -20,9 +23,12 @@ startApp = do
   let serverConfig = blogServer config
   -- Connect to database
   conn <- connect $ blogConnectInfo dbConfig
+  -- Some encryption staff
+  let sks = mkPersistentServerKey "0123456789abcdef"
+  rs <- mkRandomSource drgNew 1000
   -- Run application
-  run (serverPort serverConfig) (app conn)
+  run (serverPort serverConfig) (app rs sks conn)
 
 
-app :: Connection -> Application
-app conn = serveWithContext api (basicAuthServerContext conn) (server conn)
+app :: (ServerKeySet s) => RandomSource -> s -> Connection -> Application
+app rs s conn = serveWithContext api (authContext s) (server rs s conn)

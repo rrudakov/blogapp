@@ -15,17 +15,22 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     App
-                     , App.Config
+  exposed-modules:     App.Config
                      , App.Errors
                      , App.Models
                      , App.Routes
                      , App.Server
+                     , App
   build-depends:       base >= 4.7 && < 5
                      , aeson
                      , bytestring
+                     , cereal
+                     , cryptonite
+                     , data-default
+                     , exceptions
                      , servant
                      , servant-server
+                     , servant-auth-cookie
                      , wai
                      , warp
                      , postgresql-simple

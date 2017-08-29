@@ -50,7 +50,8 @@ publicServer :: (ServerKeySet s)
   -> Server PublicAPI
 publicServer rs sks conn =
   saveUserHandler conn :<|>
-  loginUserHandler rs sks conn
+  loginUserHandler rs sks conn :<|>
+  logoutUserHandler
 
 -- |Users API server
 usersServer :: (ServerKeySet s)
@@ -87,6 +88,9 @@ loginUserHandler rs sks conn auth = do
     Left err -> throwError $ err401 { errBody = encode err }
   where
     addSession' = addSession authSettings rs sks
+
+logoutUserHandler :: Handler (Cookied ())
+logoutUserHandler = removeSession authSettings ()
 
 allUsersHandler :: (ServerKeySet s)
   => RandomSource

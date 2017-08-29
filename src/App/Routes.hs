@@ -14,7 +14,8 @@ import Servant.Server.Experimental.Auth.Cookie
 -- |Public API
 type PublicAPI =
   "register" :> ReqBody '[JSON] User :> PostCreated '[JSON] (Headers '[Header "Location" String] Int) :<|>
-  "login" :> ReqBody '[JSON] AuthUserData :> Post '[JSON] (Cookied User)
+  "login" :> ReqBody '[JSON] AuthUserData :> Post '[JSON] (Cookied User) :<|>
+  "logout" :> Get '[JSON] (Cookied ())
 
 -- |Users API
 type UsersAPI =

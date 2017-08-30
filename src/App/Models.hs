@@ -121,7 +121,6 @@ updateUser conn userid user = do
   h <- hashPasswordUsingPolicy fastBcryptHashingPolicy (pack $ userPassword user)
   case h of
     Just hash -> do
-      putStrLn $ show hash
       res <- execute conn "UPDATE users SET password=? WHERE id=?" (hash, userid)
       case res of
         1 -> return $ Right ()

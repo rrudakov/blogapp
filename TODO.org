@@ -1,10 +1,14 @@
 #+TITLE: Roadmap for my blogapp
-* [1/3] ver-0.2.0.0
+* [1/5] ver-0.2.0.0
 ** DONE Separate YAML config
 ** TODO [0/4] Posts API
 *** TODO Post datatype
 *** TODO Post routes
 *** TODO Post server
-** TODO [0/2] Improve access rights
+** TODO [1/3] Improve access rights
 *** TODO Only admin can see users list
-*** TODO User can update only own data
+*** TODO Only admin can delete user
+*** DONE User can update only own data
+** TODO [1/2] Auth using encrypted cookies
+*** DONE Migrate from basic auth
+*** TODO Migrate to RenewableKeySet

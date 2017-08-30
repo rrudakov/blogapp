@@ -12,6 +12,7 @@ import Data.Yaml.Config
 import Database.PostgreSQL.Simple (Connection, connectDatabase, connectPassword, connectUser, connectHost, connect, defaultConnectInfo)
 import Network.Wai
 import Network.Wai.Handler.Warp
+import Network.Wai.Middleware.Cors
 import Servant
 import Servant.Server.Experimental.Auth.Cookie
 
@@ -30,5 +31,12 @@ startApp = do
   run (serverPort serverConfig) (app rs sks conn)
 
 
+myCors :: Middleware
+myCors = cors (const $ Just policy)
+  where
+    policy = simpleCorsResourcePolicy
+      { corsRequestHeaders = ["Content-Type"]
+      , corsMethods = "PUT" : "PATCH" : "DELETE": simpleMethods}
+
 app :: (ServerKeySet s) => RandomSource -> s -> Connection -> Application
-app rs s conn = serveWithContext api (authContext s) (server rs s conn)
+app rs s conn = myCors $ serveWithContext api (authContext s) (server rs s conn)

@@ -151,9 +151,9 @@ updateUserHandler rs sks conn userid user =
               case res of
                 Right () -> return ()
                 Left err -> throwError $ err404 { errBody = encode err }
-              else throwError $ err401 { errBody = encode AccessDeniedErr }
-            Nothing -> throwError $ err404 { errBody = encode UserNotFoundErr }
-        Nothing -> throwError $ err403 { errBody = encode WrongAuthCookiesErr }
+              else throwError $ err403 { errBody = encode AccessDeniedErr }
+            Nothing -> throwError $ err401 { errBody = encode WrongAuthCookiesErr }
+        Nothing -> throwError $ err401 { errBody = encode WrongAuthCookiesErr }
 
 deleteUserHandler :: (ServerKeySet s)
   => RandomSource
@@ -167,8 +167,17 @@ deleteUserHandler rs sks conn userid =
   where
     deleteUserHandler' :: AuthUserData -> Handler ()
     deleteUserHandler' auth = do
-      res <- liftIO $ deleteUser conn userid
-      case res of
-        1 -> return ()
-        0 -> throwError $ err404 { errBody = encode UserNotFoundErr }
-        _ -> throwError $ err500 { errBody = encode ServerErr }
+      case authId auth of
+        Just i -> do
+          u <- liftIO $ getUser conn i
+          case u of
+            Just u' -> if userIsAdmin u'
+              then do
+              res <- liftIO $ deleteUser conn userid
+              case res of
+                1 -> return ()
+                0 -> throwError $ err404 { errBody = encode UserNotFoundErr }
+                _ -> throwError $ err500 { errBody = encode ServerErr }
+              else throwError $ err403 { errBody = encode AccessDeniedErr }
+            Nothing -> throwError $ err401 { errBody = encode WrongAuthCookiesErr }
+        Nothing -> throwError $ err401 { errBody = encode WrongAuthCookiesErr }

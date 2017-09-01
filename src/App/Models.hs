@@ -19,7 +19,7 @@ import Data.Aeson
 import Data.ByteString.Char8 (pack)
 import Data.Monoid
 import Data.Serialize (Serialize)
-import Data.Time.Clock.POSIX
+import Data.Time
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Errors
 import Database.PostgreSQL.Simple.FromRow
@@ -60,21 +60,24 @@ data User = User
   { userId :: !Int
   , userLogin :: !String
   , userPassword :: !String
+  , userCreateAt :: UTCTime
   , userIsActive :: !Bool
   , userIsAdmin :: !Bool
   } deriving (Eq, Show)
 
 instance ToJSON User where
-  toJSON (User userid login _ active admin) =
+  toJSON (User userid login _ created active admin) =
     object [ "id" .= userid
            , "username" .= login
+           , "created" .= created
            , "is_active" .= active
            , "is_admin" .= admin
            ]
 
-  toEncoding (User userid login _ active admin) =
+  toEncoding (User userid login _ created active admin) =
     pairs ( "id" .= userid <>
             "username" .= login <>
+            "created" .= created <>
             "is_active" .= active <>
             "is_admin" .= admin )
 
@@ -83,6 +86,7 @@ instance FromJSON User where
     <$> v .: "id"
     <*> v .: "username"
     <*> v .: "password"
+    <*> v .: "created"
     <*> v .:? "is_active" .!= True
     <*> v .:? "is_admin" .!= False
 
@@ -92,7 +96,13 @@ instance ToRow User where
                , toField $ userPassword user ]
 
 instance FromRow User where
-  fromRow = User <$> field <*> field <*> field <*> field <*> field
+  fromRow = User
+    <$> field
+    <*> field
+    <*> field
+    <*> field
+    <*> field
+    <*> field
 
 allUsers :: Connection -> IO [User]
 allUsers conn = query_ conn "SELECT * FROM users ORDER BY username"
@@ -102,7 +112,7 @@ saveUser conn auth = handleJust constraintViolation handler $ do
   h <- hashPasswordUsingPolicy fastBcryptHashingPolicy (pack $ authPassword auth)
   case h of
     Just hash -> do
-      [Only i] <- query conn "INSERT INTO users (username, password, is_active, is_admin) VALUES (?, ?, ?, ?) RETURNING id" (authLogin auth, hash, True, False)
+      [Only i] <- query conn "INSERT INTO users (username, password, created_at, is_active, is_admin) VALUES (?, ?, now(), ?, ?) RETURNING id" (authLogin auth, hash, True, False)
       return $ Right i
     Nothing -> return $ Left ServerErr
   where

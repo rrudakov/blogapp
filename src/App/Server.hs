@@ -27,15 +27,14 @@ authHandler :: (ServerKeySet s)
   -> AuthHandler Request (WithMetadata AuthUserData)
 authHandler sks = mkAuthHandler $ \ request ->
   (getSession authSettings sks request) `catch` handleEx >>= maybe
-    (throwError err403 { errBody = encode NoAuthCookiesErr })
+    (throwError err403 {errBody = encode NoAuthCookiesErr})
     (return)
   where
     handleEx :: AuthCookieException -> Handler (Maybe (WithMetadata AuthUserData))
-    handleEx ex = throwError err403 { errBody = encode WrongAuthCookiesErr }
+    handleEx ex = throwError err403 {errBody = encode WrongAuthCookiesErr}
 
 authSettings :: AuthCookieSettings
-authSettings = def
-  { acsCookieFlags = ["HttpOnly"] }
+authSettings = def {acsCookieFlags = ["HttpOnly"]}
 
 authContext :: (ServerKeySet s)
   => s
@@ -84,10 +83,12 @@ loginUserHandler :: (ServerKeySet s)
 loginUserHandler rs sks conn auth = do
   res <- liftIO $ lookupAuth conn auth
   case res of
-    Right user -> addSession' (AuthUserData (Just $ userId user) (userLogin user) (userPassword user)) user
-    Left err -> throwError $ err401 { errBody = encode err }
+    Right user -> addSession' (authUserData user) user
+    Left err -> throwError $ err401 {errBody = encode err}
   where
     addSession' = addSession authSettings rs sks
+    authUserData (User i login passwd _ _ _) =
+      AuthUserData (Just i) login passwd
 
 logoutUserHandler :: Handler (Cookied ())
 logoutUserHandler = removeSession authSettings ()
@@ -102,7 +103,7 @@ allUsersHandler rs sks conn =
   cookied authSettings rs sks (Proxy :: Proxy AuthUserData) $ allUsersHandler'
   where
     allUsersHandler' :: AuthUserData -> Handler [User]
-    allUsersHandler' auth = liftIO $ allUsers conn >>= return
+    allUsersHandler' _ = liftIO $ allUsers conn >>= return
 
 getUserHandler :: (ServerKeySet s)
   => RandomSource
@@ -115,18 +116,21 @@ getUserHandler rs sks conn userid =
   cookied authSettings rs sks (Proxy :: Proxy AuthUserData) $ getUserHandler'
   where
     getUserHandler' :: AuthUserData -> Handler User
-    getUserHandler' auth = do
+    getUserHandler' _ = do
       res <- liftIO $ getUser conn userid
       case res of
         Just user -> return user
-        Nothing -> throwError $ err404 { errBody = encode UserNotFoundErr }
+        Nothing -> throwError $ err404 {errBody = encode UserNotFoundErr}
 
-saveUserHandler :: Connection -> AuthUserData -> Handler (Headers '[Header "Location" String] Int)
+saveUserHandler ::
+     Connection
+  -> AuthUserData
+  -> Handler (Headers '[ Header "Location" String] Int)
 saveUserHandler conn auth = do
   res <- liftIO $ saveUser conn auth
   case res of
     Right userid -> return $ addHeader ("/users/" ++ show userid) userid
-    Left err -> throwError $ err500 { errBody = encode err }
+    Left err -> throwError $ err409 {errBody = encode err}
 
 updateUserHandler :: (ServerKeySet s)
   => RandomSource
@@ -140,20 +144,22 @@ updateUserHandler rs sks conn userid user =
   cookied authSettings rs sks (Proxy :: Proxy AuthUserData) $ updateUserHandler'
   where
     updateUserHandler' :: AuthUserData -> Handler ()
-    updateUserHandler' auth = do
-      case authId auth of
-        Just i -> do
-          u <- liftIO $ getUser conn i
-          case u of
-            Just _user -> if userIsAdmin _user || userid == i
-              then do
+    -- No auth id
+    updateUserHandler' (AuthUserData Nothing _ _) =
+      throwError $ err401 {errBody = encode WrongAuthCookiesErr}
+    -- Authorized user
+    updateUserHandler' (AuthUserData (Just i) _ _) = do
+      u <- liftIO $ getUser conn i
+      case u of
+        Just _user ->
+          if userIsAdmin _user || userid == i
+            then do
               res <- liftIO $ updateUser conn userid user
               case res of
                 Right () -> return ()
-                Left err -> throwError $ err404 { errBody = encode err }
-              else throwError $ err403 { errBody = encode AccessDeniedErr }
-            Nothing -> throwError $ err401 { errBody = encode WrongAuthCookiesErr }
-        Nothing -> throwError $ err401 { errBody = encode WrongAuthCookiesErr }
+                Left err -> throwError $ err404 {errBody = encode err}
+            else throwError $ err403 {errBody = encode AccessDeniedErr}
+        Nothing -> throwError $ err401 {errBody = encode WrongAuthCookiesErr}
 
 deleteUserHandler :: (ServerKeySet s)
   => RandomSource
@@ -166,18 +172,20 @@ deleteUserHandler rs sks conn userid =
   cookied authSettings rs sks (Proxy :: Proxy AuthUserData) $ deleteUserHandler'
   where
     deleteUserHandler' :: AuthUserData -> Handler ()
-    deleteUserHandler' auth = do
-      case authId auth of
-        Just i -> do
-          u <- liftIO $ getUser conn i
-          case u of
-            Just u' -> if userIsAdmin u'
-              then do
+    -- No auth id
+    deleteUserHandler' (AuthUserData Nothing _ _) =
+      throwError $ err401 {errBody = encode WrongAuthCookiesErr}
+    -- Authorized user
+    deleteUserHandler' (AuthUserData (Just i) _ _) = do
+      u <- liftIO $ getUser conn i
+      case u of
+        Just u' ->
+          if userIsAdmin u'
+            then do
               res <- liftIO $ deleteUser conn userid
               case res of
                 1 -> return ()
-                0 -> throwError $ err404 { errBody = encode UserNotFoundErr }
-                _ -> throwError $ err500 { errBody = encode ServerErr }
-              else throwError $ err403 { errBody = encode AccessDeniedErr }
-            Nothing -> throwError $ err401 { errBody = encode WrongAuthCookiesErr }
-        Nothing -> throwError $ err401 { errBody = encode WrongAuthCookiesErr }
+                0 -> throwError $ err404 {errBody = encode UserNotFoundErr}
+                _ -> throwError $ err500 {errBody = encode ServerErr}
+            else throwError $ err403 {errBody = encode AccessDeniedErr}
+        Nothing -> throwError $ err401 {errBody = encode WrongAuthCookiesErr}

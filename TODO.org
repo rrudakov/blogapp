@@ -1,14 +1,14 @@
 #+TITLE: Roadmap for my blogapp
-* [2/5] ver-0.2.0.0
+* [4/5] ver-0.2.0.0
 ** DONE Separate YAML config
 ** DONE [1/1] Improve user datatype
 *** DONE Timestamp on creation
-** TODO [0/4] Posts API
-*** TODO Post datatype
-*** TODO Post routes
-*** TODO Post server
-** TODO [2/3] Improve access rights
-*** TODO Only admin can see users list
+** DONE [3/3] Posts API
+*** DONE Post datatype
+*** DONE Post routes
+*** DONE Post server
+** DONE [3/3] Improve access rights
+*** DONE Only admin can see users list
 *** DONE Only admin can delete user
 *** DONE User can update only own data
 ** TODO [1/2] Auth using encrypted cookies

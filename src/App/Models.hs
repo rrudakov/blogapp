@@ -2,14 +2,24 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 module App.Models
-  ( User (..)
+  ( -- * Types
+    User (..)
   , AuthUserData (..)
+  , BlogPost (..)
+    -- * Users functions
   , lookupAuth
   , allUsers
   , saveUser
   , getUser
   , updateUser
   , deleteUser
+    -- * Posts functions
+  , allPosts
+  , allUserPosts
+  , getPost
+  , createPost
+  , updatePost
+  , deletePost
   ) where
 
 import App.Errors
@@ -57,13 +67,13 @@ lookupAuth conn auth = do
 
 -- |User data type
 data User = User
-  { userId :: !Int
-  , userLogin :: !String
-  , userPassword :: !String
-  , userCreateAt :: UTCTime
+  { userId        :: !Int
+  , userLogin     :: !String
+  , userPassword  :: !String
+  , userCreatedAt :: UTCTime
   , userUpdatedAt :: Maybe UTCTime
-  , userIsActive :: !Bool
-  , userIsAdmin :: !Bool
+  , userIsActive  :: !Bool
+  , userIsAdmin   :: !Bool
   } deriving (Eq, Show)
 
 instance ToJSON User where
@@ -101,13 +111,13 @@ instance ToRow User where
 
 instance FromRow User where
   fromRow = User
-    <$> field
-    <*> field
-    <*> field
-    <*> field
-    <*> field
-    <*> field
-    <*> field
+    <$> field -- ^ userId
+    <*> field -- ^ userLogin
+    <*> field -- ^ userPassword
+    <*> field -- ^ userCreateAt
+    <*> field -- ^ userUpdatedAt
+    <*> field -- ^ userIsActive
+    <*> field -- ^ userIsAdmin
 
 allUsers :: Connection -> IO [User]
 allUsers conn = query_ conn "SELECT * FROM users ORDER BY username"
@@ -145,17 +155,17 @@ updateUser conn userid user = do
 
 deleteUser :: Connection -> Int -> IO Int
 deleteUser conn userid =
-  execute conn "DELETE FROM users WHERE id=? CASCADE" [userid] >>= \res ->
+  execute conn "DELETE FROM users WHERE id=?" [userid] >>= \res ->
     return $ fromIntegral res
 
 -- |Post data type
 data BlogPost = BlogPost
-  { postId :: Maybe Int
-  , postAuthorId :: Int
-  , postCreated :: UTCTime
-  , postUpdated :: Maybe UTCTime
-  , postTitle :: String
-  , postContent :: String
+  { postId        :: Maybe Int
+  , postAuthorId  :: Int
+  , postCreatedAt :: Maybe UTCTime
+  , postUpdatedAt :: Maybe UTCTime
+  , postTitle     :: String
+  , postContent   :: String
   } deriving (Eq, Show)
 
 instance ToJSON BlogPost where
@@ -179,8 +189,8 @@ instance FromJSON BlogPost where
   parseJSON = withObject "BlogPost" $ \ v -> BlogPost
     <$> v .:? "id"
     <*> v .: "author"
-    <*> v .: "created"
-    <*> v .: "updated"
+    <*> v .:? "created"
+    <*> v .:? "updated"
     <*> v .: "title"
     <*> v .: "content"
 
@@ -195,18 +205,18 @@ instance ToRow BlogPost where
 
 instance FromRow BlogPost where
   fromRow = BlogPost
-    <$> field
-    <*> field
-    <*> field
-    <*> field
-    <*> field
-    <*> field
+    <$> field -- ^ postId
+    <*> field -- ^ postAuthorId
+    <*> field -- ^ postCreatedAt
+    <*> field -- ^ postUpdatedAt
+    <*> field -- ^ postTitle
+    <*> field -- ^ postContent
 
 allPosts :: Connection -> IO [BlogPost]
-allPosts conn = query_ conn "SELECT * FROM posts ORDER BY created DESC"
+allPosts conn = query_ conn "SELECT * FROM posts ORDER BY created_at DESC"
 
 allUserPosts :: Connection -> Int -> IO [BlogPost]
-allUserPosts conn author_id = query conn "SELECT * FROM posts WHERE author=? ORDER BY created DESC" [author_id]
+allUserPosts conn author_id = query conn "SELECT * FROM posts WHERE author=? ORDER BY created_at DESC" [author_id]
 
 getPost :: Connection -> Int -> IO (Maybe BlogPost)
 getPost conn post_id = do
@@ -215,20 +225,20 @@ getPost conn post_id = do
     [post] -> return $ Just post
     _ -> return Nothing
 
-createPost :: Connection -> BlogPost -> IO Int
-createPost conn post = do
-  [Only i] <- query conn "INSERT INTO posts (author, created_at, title, content) VALUES (?, now(), ?, ?) RETURNING id" (postAuthorId post, postTitle post, postContent post)
+createPost :: Connection -> Int -> BlogPost -> IO Int
+createPost conn uid post = do
+  [Only i] <- query conn "INSERT INTO posts (author, created_at, title, content) VALUES (?, now(), ?, ?) RETURNING id" (uid, postTitle post, postContent post)
   return i
 
-updatePost :: Connection -> Int -> BlogPost -> IO (Either BlogError ())
-updatePost conn post_id post = do
-  res <- execute conn "UPDATE posts SET updated_at=now(), titlle=?, content=? WHERE post_id=?" (postTitle post, postContent post, post_id)
+updatePost :: Connection -> Int -> Int -> BlogPost -> IO (Either BlogError ())
+updatePost conn uid pid post = do
+  res <- execute conn "UPDATE posts SET updated_at=now(), title=?, content=? WHERE id=? AND author=?" (postTitle post, postContent post, pid, uid)
   case res of
     1 -> return $ Right ()
     0 -> return $ Left PostNotFoundErr
     _ -> return $ Left ServerErr
 
-deletePost :: Connection -> Int -> IO Int
-deletePost conn post_id =
-  execute conn "DELETE FROM posts WHERE id=? CASCADE" [post_id] >>= \res ->
+deletePost :: Connection -> Int -> Int -> IO Int
+deletePost conn uid pid =
+  execute conn "DELETE FROM posts WHERE id=? AND author=?" (pid, uid) >>= \res ->
     return $ fromIntegral res

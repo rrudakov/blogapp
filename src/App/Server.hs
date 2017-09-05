@@ -27,11 +27,11 @@ authHandler :: (ServerKeySet s)
   -> AuthHandler Request (WithMetadata AuthUserData)
 authHandler sks = mkAuthHandler $ \ request ->
   (getSession authSettings sks request) `catch` handleEx >>= maybe
-    (throwError err403 {errBody = encode NoAuthCookiesErr})
+    (throw403 NoAuthCookiesErr)
     (return)
   where
     handleEx :: AuthCookieException -> Handler (Maybe (WithMetadata AuthUserData))
-    handleEx ex = throwError err403 {errBody = encode WrongAuthCookiesErr}
+    handleEx ex = throw403 WrongAuthCookiesErr
 
 authSettings :: AuthCookieSettings
 authSettings = def {acsCookieFlags = ["HttpOnly"]}
@@ -120,7 +120,7 @@ getUserHandler rs sks conn userid =
       res <- liftIO $ getUser conn userid
       case res of
         Just user -> return user
-        Nothing -> throwError $ err404 {errBody = encode UserNotFoundErr}
+        Nothing -> throw404 UserNotFoundErr
 
 saveUserHandler ::
      Connection
@@ -130,7 +130,7 @@ saveUserHandler conn auth = do
   res <- liftIO $ saveUser conn auth
   case res of
     Right userid -> return $ addHeader ("/users/" ++ show userid) userid
-    Left err -> throwError $ err409 {errBody = encode err}
+    Left err -> throw409 err
 
 updateUserHandler :: (ServerKeySet s)
   => RandomSource
@@ -145,8 +145,7 @@ updateUserHandler rs sks conn userid user =
   where
     updateUserHandler' :: AuthUserData -> Handler ()
     -- No auth id
-    updateUserHandler' (AuthUserData Nothing _ _) =
-      throwError $ err401 {errBody = encode WrongAuthCookiesErr}
+    updateUserHandler' (AuthUserData Nothing _ _) = throw401 WrongAuthCookiesErr
     -- Authorized user
     updateUserHandler' (AuthUserData (Just i) _ _) = do
       u <- liftIO $ getUser conn i
@@ -157,9 +156,9 @@ updateUserHandler rs sks conn userid user =
               res <- liftIO $ updateUser conn userid user
               case res of
                 Right () -> return ()
-                Left err -> throwError $ err404 {errBody = encode err}
-            else throwError $ err403 {errBody = encode AccessDeniedErr}
-        Nothing -> throwError $ err401 {errBody = encode WrongAuthCookiesErr}
+                Left err -> throw404 err
+            else throw403 AccessDeniedErr
+        Nothing -> throw401 WrongAuthCookiesErr
 
 deleteUserHandler :: (ServerKeySet s)
   => RandomSource
@@ -172,20 +171,32 @@ deleteUserHandler rs sks conn userid =
   cookied authSettings rs sks (Proxy :: Proxy AuthUserData) $ deleteUserHandler'
   where
     deleteUserHandler' :: AuthUserData -> Handler ()
-    -- No auth id
-    deleteUserHandler' (AuthUserData Nothing _ _) =
-      throwError $ err401 {errBody = encode WrongAuthCookiesErr}
-    -- Authorized user
-    deleteUserHandler' (AuthUserData (Just i) _ _) = do
-      u <- liftIO $ getUser conn i
-      case u of
-        Just u' ->
-          if userIsAdmin u'
-            then do
-              res <- liftIO $ deleteUser conn userid
-              case res of
-                1 -> return ()
-                0 -> throwError $ err404 {errBody = encode UserNotFoundErr}
-                _ -> throwError $ err500 {errBody = encode ServerErr}
-            else throwError $ err403 {errBody = encode AccessDeniedErr}
-        Nothing -> throwError $ err401 {errBody = encode WrongAuthCookiesErr}
+    deleteUserHandler' auth = do
+      res <- liftIO . withAdminPermissions auth conn $ deleteUser conn userid
+      case res of
+        Right 1 -> return ()
+        Right 0 -> throw404 UserNotFoundErr
+        Right _ -> throw500 ServerErr
+        Left err -> case err of
+          WrongAuthCookiesErr -> throw401 err
+          AccessDeniedErr -> throw403 err
+
+-- |Execute action only if authorized as admin
+withAdminPermissions
+  :: AuthUserData
+  -> Connection
+  -> IO a
+  -> IO (Either BlogError a)
+-- Not authorized user
+withAdminPermissions (AuthUserData Nothing _ _) _ _ = return $ Left WrongAuthCookiesErr
+-- Authorized user
+withAdminPermissions (AuthUserData (Just i) _ _) conn action = do
+  user <- getUser conn i
+  case user of
+    Just u ->
+      if userIsAdmin u
+      then do
+        res <- action
+        return $ Right res
+      else return $  Left AccessDeniedErr
+    Nothing -> return $ Left WrongAuthCookiesErr

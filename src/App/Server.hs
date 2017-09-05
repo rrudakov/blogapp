@@ -87,7 +87,7 @@ loginUserHandler rs sks conn auth = do
     Left err -> throwError $ err401 {errBody = encode err}
   where
     addSession' = addSession authSettings rs sks
-    authUserData (User i login passwd _ _ _) =
+    authUserData (User i login passwd _ _ _ _) =
       AuthUserData (Just i) login passwd
 
 logoutUserHandler :: Handler (Cookied ())

@@ -5,3 +5,4 @@ database:
   database_name: 'blogdb'
 server:
   port: 8080
+secret: "secret_phrase"

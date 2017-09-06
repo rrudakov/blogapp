@@ -23,6 +23,8 @@ data BlogError = LoginExistErr
                | WrongAuthCookiesErr
                | AccessDeniedErr
                | PostNotFoundErr
+               | AuthRequiredErr
+               | InvalidTokenErr
 
 instance Show BlogError where
   show LoginExistErr = "LOGIN_ALREADY_EXIST"
@@ -35,6 +37,8 @@ instance Show BlogError where
   show WrongAuthCookiesErr = "WRONG_AUTH_COOKIES"
   show AccessDeniedErr = "ACCESS_DENIED"
   show PostNotFoundErr = "POST_NOT_FOUND"
+  show AuthRequiredErr = "AUTHORIZATION_REQUIRED"
+  show InvalidTokenErr = "INVALID_TOKEN"
 
 instance ToJSON BlogError where
   toJSON err = object ["err" .= show err]

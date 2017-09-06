@@ -33,12 +33,14 @@ instance FromJSON ServerConfig where
 data BlogConfig = BlogConfig
   { blogDB :: DBConfig
   , blogServer :: ServerConfig
+  , blogSecret :: String
   } deriving (Show)
 
 instance FromJSON BlogConfig where
   parseJSON = withObject "BlogConfig" $ \ v -> BlogConfig
     <$> v .: "database"
     <*> v .: "server"
+    <*> v .: "secret"
 
 blogConnectInfo :: DBConfig -> ConnectInfo
 blogConnectInfo conf = ConnectInfo

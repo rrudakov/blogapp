@@ -9,353 +9,214 @@ module App.Server
   , authContext
   ) where
 
-import App.Errors
-import App.Models
-import App.Routes (PublicAPI, UsersAPI, PostsAPI, API)
-import Control.Monad.Catch (catch)
-import Control.Monad.IO.Class
-import Data.Aeson
-import Data.ByteString.Char8 (pack, unpack)
-import Data.Default (def)
-import Database.PostgreSQL.Simple (Connection)
-import Network.Wai (Application, Request)
-import Servant
-import Servant.Server.Experimental.Auth (AuthHandler, mkAuthHandler)
-import Servant.Server.Experimental.Auth.Cookie
+import           App.Errors
+import           App.Models
+import           App.Routes (PublicAPI, UsersAPI, PostsAPI, API)
+import           Control.Monad.Catch (catch)
+import           Control.Monad.IO.Class
+import           Data.Aeson
+import qualified Data.ByteString as BS
+import           Data.ByteString.Char8 (pack, unpack)
+import qualified Data.Map as Map
+import qualified Data.Text as T
+import           Data.Text.Encoding (decodeUtf8)
+import           Database.PostgreSQL.Simple (Connection)
+import           Network.Wai (Application, Request)
+import           Network.Wai (requestHeaders)
+import           Servant
+import           Servant.Server.Experimental.Auth (AuthHandler, mkAuthHandler)
+import qualified Web.JWT as JWT
 
--- |Authorization staff
-authHandler :: (ServerKeySet s)
-  => s
-  -> AuthHandler Request (WithMetadata AuthUserData)
-authHandler sks = mkAuthHandler $ \ request ->
-  (getSession authSettings sks request) `catch` handleEx >>= maybe
-    (throw403 NoAuthCookiesErr)
-    (return)
+-- |JSON Web Token authorization staff
+authHandler :: JWT.Secret -> Connection -> AuthHandler Request User
+authHandler key conn = mkAuthHandler $ \ req -> do
+  case lookup "Authorization" (requestHeaders req) of
+    Nothing -> throw401 AuthRequiredErr
+    Just token ->
+      case decodeToken key token of
+        Nothing -> throw401 InvalidTokenErr
+        Just creds -> do
+          res <- liftIO $ lookupAuth conn creds
+          case res of
+            Left err -> throw401 err
+            Right user -> return user
+
+authContext :: JWT.Secret -> Connection -> Context (AuthHandler Request User ': '[])
+authContext key conn = authHandler key conn :. EmptyContext
+
+decodeToken :: JWT.Secret -> BS.ByteString -> Maybe UserCredentials
+decodeToken key token = case creds of
+  Just (Success c) -> Just c
+  Just (Error s) -> error s
+  Nothing -> Nothing
   where
-    handleEx :: AuthCookieException -> Handler (Maybe (WithMetadata AuthUserData))
-    handleEx ex = throw403 WrongAuthCookiesErr
+    t' = decodeUtf8 token
+    (_, t) = T.splitAt (T.length "Token ") t'
+    mJwt = JWT.decodeAndVerifySignature key t
+    json = JWT.unregisteredClaims . JWT.claims <$> mJwt >>= Map.lookup "credentials"
+    creds = fromJSON <$> json
 
-authSettings :: AuthCookieSettings
-authSettings = def {acsCookieFlags = ["HttpOnly"]}
-
-authContext :: (ServerKeySet s)
-  => s
-  -> Context (AuthHandler Request (WithMetadata AuthUserData) ': '[])
-authContext sks = ((authHandler sks) :. EmptyContext)
+encodeToken :: JWT.Secret -> UserCredentials -> JWT.JSON
+encodeToken key creds =
+  JWT.encodeSigned
+    JWT.HS256
+    key
+    JWT.def
+    {JWT.unregisteredClaims = Map.singleton "credentials" $ toJSON creds}
 
 -- |Public API server
-publicServer :: (ServerKeySet s)
-  => RandomSource
-  -> s
-  -> Connection
-  -> Server PublicAPI
-publicServer rs sks conn =
-  saveUserHandler conn :<|>
-  loginUserHandler rs sks conn :<|>
-  logoutUserHandler
+publicServer :: JWT.Secret -> Connection -> Server PublicAPI
+publicServer key conn =
+  saveUserHandler key conn :<|>
+  loginUserHandler key conn
 
 -- |Users API server
-usersServer :: (ServerKeySet s)
-  => RandomSource
-  -> s
-  -> Connection
-  -> Server UsersAPI
-usersServer rs sks conn =
-  allUsersHandler rs sks conn :<|>
-  getUserHandler rs sks conn :<|>
-  updateUserHandler rs sks conn :<|>
-  deleteUserHandler rs sks conn
+usersServer :: Connection -> User -> Server UsersAPI
+usersServer conn user =
+  allUsersHandler conn user :<|>
+  getUserHandler conn user :<|>
+  updateUserHandler conn user :<|>
+  deleteUserHandler conn user
 
 -- |Posts API server
-postsServer :: (ServerKeySet s)
-  => RandomSource
-  -> s
-  -> Connection
-  -> Server PostsAPI
-postsServer rs sks conn uid =
-  allUserPostsHandler rs sks conn uid :<|>
-  getUserPostHandler rs sks conn uid :<|>
-  createUserPostHandler rs sks conn uid :<|>
-  updateUserPostHandler rs sks conn uid :<|>
-  deleteUserPostHandler rs sks conn uid
+postsServer :: Connection -> User -> Server PostsAPI
+postsServer conn user uid =
+  allUserPostsHandler conn user uid :<|>
+  getUserPostHandler conn user uid :<|>
+  createUserPostHandler conn user uid :<|>
+  updateUserPostHandler conn user uid :<|>
+  deleteUserPostHandler conn user uid
 
-server :: (ServerKeySet s)
-  => RandomSource
-  -> s
-  -> Connection
-  -> Server API
-server rs sks conn =
-  publicServer rs sks conn :<|>
-  usersServer rs sks conn :<|>
-  postsServer rs sks conn
+server :: JWT.Secret -> Connection -> Server API
+server key conn =
+  publicServer key conn :<|>
+  usersServer conn :<|>
+  postsServer conn
 
 -- |Authorization/Registration handlers
-loginUserHandler :: (ServerKeySet s)
-  => RandomSource
-  -> s
-  -> Connection
-  -> AuthUserData
-  -> Handler (Cookied User)
-loginUserHandler rs sks conn auth = do
-  res <- liftIO $ lookupAuth conn auth
+loginUserHandler :: JWT.Secret -> Connection -> UserCredentials -> Handler UserWithToken
+loginUserHandler key conn creds = do
+  res <- liftIO $ lookupAuth conn creds
   case res of
-    Right user -> addSession' (authUserData user) user
+    Right user -> return $ UserWithToken (authLogin creds) (T.unpack $ encodeToken key creds)
     Left err -> throwError $ err401 {errBody = encode err}
-  where
-    addSession' = addSession authSettings rs sks
-    authUserData (User i login passwd _ _ _ _) =
-      AuthUserData (Just i) login passwd
-
-logoutUserHandler :: Handler (Cookied ())
-logoutUserHandler = removeSession authSettings ()
 
 -- |User handlers
-allUsersHandler :: (ServerKeySet s)
-  => RandomSource
-  -> s
-  -> Connection
-  -> WithMetadata AuthUserData
-  -> Handler (Cookied [User])
-allUsersHandler rs sks conn =
-  cookied authSettings rs sks (Proxy :: Proxy AuthUserData) $ allUsersHandler'
-  where
-    allUsersHandler' :: AuthUserData -> Handler [User]
-    allUsersHandler' auth = do
-      res <- liftIO . withAdminPermissions auth conn $ allUsers conn
-      case res of
-        Right users -> return users
-        Left err ->
-          case err of
-            WrongAuthCookiesErr -> throw401 err
-            AccessDeniedErr -> throw403 err
+allUsersHandler :: Connection -> User -> Handler [User]
+allUsersHandler conn user = do
+  res <- liftIO . withAdminPermissions user conn $ allUsers conn
+  case res of
+    Right users -> return users
+    Left err ->
+      case err of
+        WrongAuthCookiesErr -> throw401 err
+        AccessDeniedErr -> throw403 err
 
-getUserHandler :: (ServerKeySet s)
-  => RandomSource
-  -> s
-  -> Connection
-  -> Int
-  -> WithMetadata AuthUserData
-  -> Handler (Cookied User)
-getUserHandler rs sks conn userid =
-  cookied authSettings rs sks (Proxy :: Proxy AuthUserData) $ getUserHandler'
-  where
-    getUserHandler' :: AuthUserData -> Handler User
-    getUserHandler' _ = do
+getUserHandler :: Connection -> User -> Int -> Handler User
+getUserHandler conn user userid = do
       res <- liftIO $ getUser conn userid
       case res of
         Just user -> return user
         Nothing -> throw404 UserNotFoundErr
 
-saveUserHandler ::
-     Connection
-  -> AuthUserData
-  -> Handler (Headers '[ Header "Location" String] Int)
-saveUserHandler conn auth = do
-  res <- liftIO $ saveUser conn auth
+saveUserHandler :: JWT.Secret -> Connection -> UserCredentials -> Handler UserWithToken
+saveUserHandler key conn creds = do
+  res <- liftIO $ saveUser conn creds
   case res of
-    Right userid -> return $ addHeader ("/users/" ++ show userid) userid
+    Right userid -> return $ UserWithToken (authLogin creds) (T.unpack $ encodeToken key creds)
     Left err -> throw409 err
 
-updateUserHandler :: (ServerKeySet s)
-  => RandomSource
-  -> s
-  -> Connection
-  -> Int
-  -> User
-  -> WithMetadata AuthUserData
-  -> Handler (Cookied ())
-updateUserHandler rs sks conn userid user =
-  cookied authSettings rs sks (Proxy :: Proxy AuthUserData) $ updateUserHandler'
-  where
-    updateUserHandler' :: AuthUserData -> Handler ()
-    updateUserHandler' auth = do
-      res <- liftIO . withOwnRestriction auth conn userid $ updateUser conn userid user
-      case res of
-        Right r -> case r of
-          Right () -> return ()
-          Left err -> case err of
-            UserNotFoundErr -> throw404 err
-            ServerErr -> throw500 err
-        Left err -> case err of
-          WrongAuthCookiesErr -> throw401 err
-          AccessDeniedErr -> throw403 err
+updateUserHandler :: Connection -> User -> Int -> User -> Handler ()
+updateUserHandler conn user uid u = do
+  res <- liftIO . withOwnRestriction user conn uid $ updateUser conn uid u
+  case res of
+    Right r -> case r of
+      Right () -> return ()
+      Left err -> case err of
+        UserNotFoundErr -> throw404 err
+        ServerErr -> throw500 err
+    Left err -> case err of
+      WrongAuthCookiesErr -> throw401 err
+      AccessDeniedErr -> throw403 err
 
-deleteUserHandler :: (ServerKeySet s)
-  => RandomSource
-  -> s
-  -> Connection
-  -> Int
-  -> WithMetadata AuthUserData
-  -> Handler (Cookied ())
-deleteUserHandler rs sks conn userid =
-  cookied authSettings rs sks (Proxy :: Proxy AuthUserData) $ deleteUserHandler'
-  where
-    deleteUserHandler' :: AuthUserData -> Handler ()
-    deleteUserHandler' auth = do
-      res <- liftIO . withAdminPermissions auth conn $ deleteUser conn userid
-      case res of
-        Right 1 -> return ()
-        Right 0 -> throw404 UserNotFoundErr
-        Right _ -> throw500 ServerErr
-        Left err -> case err of
-          WrongAuthCookiesErr -> throw401 err
-          AccessDeniedErr -> throw403 err
+deleteUserHandler :: Connection -> User -> Int -> Handler ()
+deleteUserHandler conn user uid = do
+  res <- liftIO . withAdminPermissions user conn $ deleteUser conn uid
+  case res of
+    Right 1 -> return ()
+    Right 0 -> throw404 UserNotFoundErr
+    Right _ -> throw500 ServerErr
+    Left err -> case err of
+      WrongAuthCookiesErr -> throw401 err
+      AccessDeniedErr -> throw403 err
 
 -- |Posts handlers
-allUserPostsHandler :: (ServerKeySet s)
-  => RandomSource
-  -> s
-  -> Connection
-  -> Int
-  -> WithMetadata AuthUserData
-  -> Handler (Cookied [BlogPost])
-allUserPostsHandler rs sks conn userid =
-  cookied authSettings rs sks (Proxy :: Proxy AuthUserData) $ allUserPostsHandler'
-  where
-    allUserPostsHandler' :: AuthUserData -> Handler [BlogPost]
-    allUserPostsHandler' auth = do
-      res <- liftIO . withOwnRestriction auth conn userid $ allUserPosts conn userid
-      case res of
-        Right posts -> return posts
+allUserPostsHandler :: Connection -> User -> Int -> Handler [BlogPost]
+allUserPostsHandler conn user uid = do
+  res <- liftIO . withOwnRestriction user conn uid $ allUserPosts conn uid
+  case res of
+    Right posts -> return posts
+    Left err ->
+      case err of
+        WrongAuthCookiesErr -> throw401 err
+        AccessDeniedErr -> throw403 err
+
+getUserPostHandler :: Connection -> User -> Int -> Int -> Handler BlogPost
+getUserPostHandler conn user uid pid = do
+  res <- liftIO . withOwnRestriction user conn uid $ getPost conn pid
+  case res of
+    Right post ->
+      case post of
+        Just p -> return p
+        Nothing -> throw404 PostNotFoundErr
+    Left err ->
+      case err of
+        WrongAuthCookiesErr -> throw401 err
+        AccessDeniedErr -> throw403 err
+
+createUserPostHandler :: Connection -> User -> Int -> BlogPost -> Handler Int
+createUserPostHandler conn user uid post = do
+  res <- liftIO . withOwnRestriction user conn uid $ createPost conn uid post
+  case res of
+    Right pid -> return pid
+    Left err -> throw403 err
+
+updateUserPostHandler :: Connection -> User -> Int -> Int -> BlogPost -> Handler ()
+updateUserPostHandler conn user uid pid post = do
+  res <- liftIO . withOwnRestriction user conn uid $ updatePost conn uid pid post
+  case res of
+    Right updated ->
+      case updated of
+        Right () -> return ()
         Left err ->
           case err of
-            WrongAuthCookiesErr -> throw401 err
-            AccessDeniedErr -> throw403 err
+            PostNotFoundErr -> throw404 err
+            ServerErr -> throw500 err
+    Left err -> throw403 err
 
-getUserPostHandler :: (ServerKeySet s)
-  => RandomSource
-  -> s
-  -> Connection
-  -> Int
-  -> Int
-  -> WithMetadata AuthUserData
-  -> Handler (Cookied BlogPost)
-getUserPostHandler rs sks conn userid postid =
-  cookied authSettings rs sks (Proxy :: Proxy AuthUserData) $ getUserPostHandler'
-  where
-    getUserPostHandler' :: AuthUserData -> Handler BlogPost
-    getUserPostHandler' auth = do
-      res <- liftIO . withOwnRestriction auth conn userid $ getPost conn postid
-      case res of
-        Right post ->
-          case post of
-            Just p -> return p
-            Nothing -> throw404 PostNotFoundErr
-        Left err ->
-          case err of
-            WrongAuthCookiesErr -> throw401 err
-            AccessDeniedErr -> throw403 err
-
-createUserPostHandler :: (ServerKeySet s)
-  => RandomSource
-  -> s
-  -> Connection
-  -> Int
-  -> BlogPost
-  -> WithMetadata AuthUserData
-  -> Handler (Cookied Int)
-createUserPostHandler rs sks conn uid post =
-  cookied authSettings rs sks (Proxy :: Proxy AuthUserData) $ createUserPostHandler'
-  where
-    createUserPostHandler' :: AuthUserData -> Handler Int
-    createUserPostHandler' auth = do
-      res <- liftIO . withOwnRestriction auth conn uid $ createPost conn uid post
-      case res of
-        Right pid -> return pid
-        Left err ->
-          case err of
-            WrongAuthCookiesErr -> throw401 err
-            AccessDeniedErr -> throw403 err
-
-updateUserPostHandler :: (ServerKeySet s)
-  => RandomSource
-  -> s
-  -> Connection
-  -> Int
-  -> Int
-  -> BlogPost
-  -> WithMetadata AuthUserData
-  -> Handler (Cookied ())
-updateUserPostHandler rs sks conn uid pid post =
-  cookied authSettings rs sks (Proxy :: Proxy AuthUserData) $ updateUserPostHandler'
-  where
-    updateUserPostHandler' :: AuthUserData -> Handler ()
-    updateUserPostHandler' auth = do
-      res <- liftIO . withOwnRestriction auth conn uid $ updatePost conn uid pid post
-      case res of
-        Right updated ->
-          case updated of
-            Right () -> return ()
-            Left err ->
-              case err of
-                PostNotFoundErr -> throw404 err
-                ServerErr -> throw500 err
-        Left err ->
-          case err of
-            WrongAuthCookiesErr -> throw401 err
-            AccessDeniedErr -> throw403 err
-
-deleteUserPostHandler :: (ServerKeySet s)
-  => RandomSource
-  -> s
-  -> Connection
-  -> Int
-  -> Int
-  -> WithMetadata AuthUserData
-  -> Handler (Cookied ())
-deleteUserPostHandler rs sks conn uid pid =
-  cookied authSettings rs sks (Proxy :: Proxy AuthUserData) $ deleteUserPostHandler'
-  where
-    deleteUserPostHandler' :: AuthUserData -> Handler ()
-    deleteUserPostHandler' auth = do
-      res <- liftIO . withOwnRestriction auth conn uid $ deletePost conn uid pid
-      case res of
-        Right 1 -> return ()
-        Right 0 -> throw404 PostNotFoundErr
-        Right _ -> throw500 ServerErr
-        Left err -> case err of
-          WrongAuthCookiesErr -> throw401 err
-          AccessDeniedErr -> throw403 err
+deleteUserPostHandler :: Connection -> User -> Int -> Int -> Handler ()
+deleteUserPostHandler conn user uid pid = do
+  res <- liftIO . withOwnRestriction user conn uid $ deletePost conn uid pid
+  case res of
+    Right 1 -> return ()
+    Right 0 -> throw404 PostNotFoundErr
+    Right _ -> throw500 ServerErr
+    Left err -> throw403 err
 
 -- |Execute action only if authorized as admin
-withAdminPermissions
-  :: AuthUserData
-  -> Connection
-  -> IO a
-  -> IO (Either BlogError a)
--- Not authorized user
-withAdminPermissions (AuthUserData Nothing _ _) _ _ =
-  return $ Left WrongAuthCookiesErr
--- Authorized user
-withAdminPermissions (AuthUserData (Just i) _ _) conn action = do
-  user <- getUser conn i
-  case user of
-    Just u ->
-      if userIsAdmin u
-      then do
-        res <- action
-        return $ Right res
-      else return $ Left AccessDeniedErr
-    Nothing -> return $ Left WrongAuthCookiesErr
+withAdminPermissions :: User -> Connection -> IO a -> IO (Either BlogError a)
+withAdminPermissions user conn action = do
+  if userIsAdmin user
+    then do
+    res <- action
+    return $ Right res
+    else return $ Left AccessDeniedErr
 
 -- |Execute action only if owner or admin
-withOwnRestriction
-  :: AuthUserData
-  -> Connection
-  -> Int
-  -> IO a
-  -> IO (Either BlogError a)
--- Not authorized user
-withOwnRestriction (AuthUserData Nothing _ _) _ _ _ =
-  return $ Left WrongAuthCookiesErr
--- Authorized user
-withOwnRestriction (AuthUserData (Just i) _ _) conn action_id action = do
-  user <- getUser conn i
-  case user of
-    Just u ->
-      if userIsAdmin u || action_id == i
-      then do
-        res <- action
-        return $ Right res
-      else return $ Left AccessDeniedErr
-    Nothing -> return $ Left WrongAuthCookiesErr
+withOwnRestriction :: User -> Connection -> Int -> IO a -> IO (Either BlogError a)
+withOwnRestriction user conn aid action = do
+  if userIsAdmin user || aid == userId user
+    then do
+    res <- action
+    return $ Right res
+    else return $ Left AccessDeniedErr

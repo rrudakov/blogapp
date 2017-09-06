@@ -1,10 +1,12 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 module App.Models
   ( -- * Types
     User (..)
-  , AuthUserData (..)
+  , UserCredentials (..)
+  , UserWithToken (..)
   , BlogPost (..)
     -- * Users functions
   , lookupAuth
@@ -28,7 +30,6 @@ import Crypto.BCrypt
 import Data.Aeson
 import Data.ByteString.Char8 (pack)
 import Data.Monoid
-import Data.Serialize (Serialize)
 import Data.Time
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Errors
@@ -36,34 +37,53 @@ import Database.PostgreSQL.Simple.FromRow
 import Database.PostgreSQL.Simple.ToField
 import Database.PostgreSQL.Simple.ToRow
 import GHC.Generics
-import Servant.Server.Experimental.Auth.Cookie (AuthCookieData)
+import Servant (AuthProtect)
+import Servant.Server.Experimental.Auth (AuthServerData)
 
 -- |Data type used for authentication
-data AuthUserData = AuthUserData
-  { authId :: Maybe Int
-  , authLogin :: !String
+data UserCredentials = UserCredentials
+  { authLogin :: !String
   , authPassword :: !String
   } deriving (Eq, Show, Generic)
 
-instance Serialize AuthUserData
+instance ToJSON UserCredentials where
+  toJSON (UserCredentials l p) =
+    object [ "username" .= l
+           , "password" .= p ]
 
-type instance AuthCookieData = AuthUserData
+  toEncoding (UserCredentials l p) =
+    pairs ( "username" .= l <>
+            "password" .= p )
 
-instance FromJSON AuthUserData where
-  parseJSON = withObject "AuthUserData" $ \ v -> AuthUserData
-    <$> v .:? "id"
-    <*> v .: "username"
+instance FromJSON UserCredentials where
+  parseJSON = withObject "UserCredentials" $ \ v -> UserCredentials
+    <$> v .: "username"
     <*> v .: "password"
 
-lookupAuth :: Connection -> AuthUserData -> IO (Either BlogError User)
-lookupAuth conn auth = do
-  res <- query conn "SELECT * FROM users WHERE username=?" [authLogin auth]
+lookupAuth :: Connection -> UserCredentials -> IO (Either BlogError User)
+lookupAuth conn (UserCredentials l p) = do
+  res <- query conn "SELECT * FROM users WHERE username=?" [l]
   case res of
     [user] -> do
-      case validatePassword (pack $ userPassword user) (pack $  authPassword auth) of
+      case validatePassword (pack $ userPassword user) (pack p) of
         True -> return $ Right user
         False -> return $ Left WrongPasswordErr
     _ -> return $ Left LoginIncorrectErr
+
+-- |Return after successfull authorization
+data UserWithToken = UserWithToken
+  { uwtLogin :: !String
+  , uwtToken :: !String
+  } deriving (Eq, Show)
+
+instance ToJSON UserWithToken where
+  toJSON (UserWithToken l t) =
+    object [ "username" .= l
+           , "token" .= t ]
+
+  toEncoding (UserWithToken l t) =
+    pairs ( "username" .= l <>
+            "token" .= t )
 
 -- |User data type
 data User = User
@@ -75,6 +95,8 @@ data User = User
   , userIsActive  :: !Bool
   , userIsAdmin   :: !Bool
   } deriving (Eq, Show)
+
+type instance AuthServerData (AuthProtect "JWT") = User
 
 instance ToJSON User where
   toJSON (User userid login _ created updated active admin) =
@@ -122,7 +144,7 @@ instance FromRow User where
 allUsers :: Connection -> IO [User]
 allUsers conn = query_ conn "SELECT * FROM users ORDER BY username"
 
-saveUser :: Connection -> AuthUserData -> IO (Either BlogError Int)
+saveUser :: Connection -> UserCredentials -> IO (Either BlogError Int)
 saveUser conn auth = handleJust constraintViolation handler $ do
   h <- hashPasswordUsingPolicy fastBcryptHashingPolicy (pack $ authPassword auth)
   case h of
